@@ -1,0 +1,48 @@
+GIT
+  remote: git://github.com/ajb/pipedrive-ruby.git
+  revision: 8a02d44a838beabb02957cf430ac6e0e3477a709
+  specs:
+    pipedrive-ruby (0.3.3)
+      httparty
+      json (>= 1.7.7)
+      multi_xml (>= 0.5.2)
+      webmock
+
+GEM
+  specs:
+    activesupport (5.0.0.1)
+      concurrent-ruby (~> 1.0, >= 1.0.2)
+      i18n (~> 0.7)
+      minitest (~> 5.1)
+      tzinfo (~> 1.1)
+    addressable (2.4.0)
+    concurrent-ruby (1.0.2)
+    crack (0.4.3)
+      safe_yaml (~> 1.0.0)
+    dotenv (2.1.1)
+    hashdiff (0.3.0)
+    httparty (0.14.0)
+      multi_xml (>= 0.5.2)
+    i18n (0.7.0)
+    json (1.8.3)
+    minitest (5.9.0)
+    multi_xml (0.5.5)
+    safe_yaml (1.0.4)
+    thread_safe (0.3.5)
+    tzinfo (1.2.2)
+      thread_safe (~> 0.1)
+    webmock (2.1.0)
+      addressable (>= 2.3.6)
+      crack (>= 0.3.2)
+      hashdiff
+
+PLATFORMS
+  ruby
+
+DEPENDENCIES
+  activesupport
+  dotenv
+  pipedrive-ruby!
+
+BUNDLED WITH
+   1.12.5

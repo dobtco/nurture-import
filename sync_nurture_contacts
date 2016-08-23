@@ -1,0 +1,37 @@
+#!/usr/bin/env ruby
+
+require "bundler/setup"
+require 'active_support/all'
+require 'csv'
+require 'dotenv'
+require 'pipedrive-ruby'
+
+NURTURE_STAGE_ID = 92
+
+Dotenv.load
+
+Pipedrive.authenticate(ENV['PIPEDRIVE_TOKEN'])
+
+deals = Pipedrive::Base.all(Pipedrive::Base.get("/stages/#{NURTURE_STAGE_ID}/deals", query: {everyone: '1'}))
+
+deal_ids = deals.map(&:id)
+emails = []
+
+puts "Found #{deal_ids.length} deals in nurture."
+
+deal_ids.each do |deal_id|
+  participants = Pipedrive::Base.get("/deals/#{deal_id}/participants")['data']
+
+  participants.each do |p|
+    emails << p.dig('person', 'email', 0, 'value')
+  end
+end
+
+puts "Before cleaning, found #{emails.length} emails to nurture."
+
+emails = emails.
+          map(&:downcase).
+          uniq.
+          reject { |e| e.ends_with?("@dobt.co") }
+
+puts "After cleaning, found #{emails.length} emails to nurture."
