@@ -5,10 +5,33 @@ require 'active_support/all'
 require 'csv'
 require 'dotenv'
 require 'pipedrive-ruby'
+require 'pry'
 
 NURTURE_STAGE_ID = 92
+HOUSE_LIST_ID = 47848
 
 Dotenv.load
+
+puts "Getting house list..."
+
+emails = []
+i = 0
+while (i += 1)
+  puts "Getting page #{i}"
+  resp = HTTParty.get(
+    "https://api.sendgrid.com/v3/contactdb/lists/#{HOUSE_LIST_ID}/recipients",
+    query: { page_size: 1000, page: i },
+    headers: { 'Authorization' => "Bearer #{ENV['SENDGRID_API_TOKEN']}" }
+  )
+
+  page_emails = Array(resp['recipients']).map { |r| r['email'] }
+  emails.push(*page_emails)
+  break if page_emails.length == 0
+end
+
+emails = emails.map(&:downcase).uniq
+
+puts "Found #{emails.length} emails on house list."
 
 Pipedrive.authenticate(ENV['PIPEDRIVE_TOKEN'])
 
