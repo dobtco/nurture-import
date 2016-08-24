@@ -8,53 +8,150 @@ require 'pipedrive-ruby'
 require 'pry'
 
 NURTURE_STAGE_ID = 92
-HOUSE_LIST_ID = 47848
+NURTURE_LIST_ID = 528468
 
 Dotenv.load
 
-puts "Getting house list..."
-
-emails = []
-i = 0
-while (i += 1)
-  puts "Getting page #{i}"
-  resp = HTTParty.get(
-    "https://api.sendgrid.com/v3/contactdb/lists/#{HOUSE_LIST_ID}/recipients",
-    query: { page_size: 1000, page: i },
-    headers: { 'Authorization' => "Bearer #{ENV['SENDGRID_API_TOKEN']}" }
-  )
-
-  page_emails = Array(resp['recipients']).map { |r| r['email'] }
-  emails.push(*page_emails)
-  break if page_emails.length == 0
+def sendgrid_auth_header
+  { 'Authorization' => "Bearer #{ENV['SENDGRID_API_TOKEN']}" }
 end
 
-emails = emails.map(&:downcase).uniq
+def clean_emails(emails)
+  emails.select(&:present?).map(&:downcase).uniq
+end
 
-puts "Found #{emails.length} emails on house list."
+def get_nurture_list
+  puts "Getting nurture list..."
 
-Pipedrive.authenticate(ENV['PIPEDRIVE_TOKEN'])
+  emails = []
+  i = 0
+  while (i += 1)
+    puts "Getting page #{i}"
+    resp = HTTParty.get(
+      "https://api.sendgrid.com/v3/contactdb/lists/#{NURTURE_LIST_ID}/recipients",
+      query: { page_size: 1000, page: i },
+      headers: sendgrid_auth_header
+    )
 
-deals = Pipedrive::Base.all(Pipedrive::Base.get("/stages/#{NURTURE_STAGE_ID}/deals", query: {everyone: '1'}))
+    page_emails = Array(resp['recipients']).map { |r| r['email'] }
+    emails.push(*page_emails)
+    break if page_emails.length == 0
+  end
 
-deal_ids = deals.map(&:id)
-emails = []
+  emails = clean_emails(emails)
 
-puts "Found #{deal_ids.length} deals in nurture."
+  puts "Found #{emails.length} emails on nurture list."
 
-deal_ids.each do |deal_id|
-  participants = Pipedrive::Base.get("/deals/#{deal_id}/participants")['data']
+  emails
+end
 
-  participants.each do |p|
-    emails << p.dig('person', 'email', 0, 'value')
+def get_nurture_emails_from_pipedrive
+  Pipedrive.authenticate(ENV['PIPEDRIVE_TOKEN'])
+
+  deals = Pipedrive::Base.all(Pipedrive::Base.get("/stages/#{NURTURE_STAGE_ID}/deals", query: {everyone: '1'}))
+
+  deal_ids = deals.map(&:id)
+  emails = []
+
+  puts "Found #{deal_ids.length} deals in nurture."
+
+  deal_ids.each do |deal_id|
+    participants = Pipedrive::Base.get("/deals/#{deal_id}/participants")['data']
+
+    participants.each do |p|
+      emails << p.dig('person', 'email', 0, 'value')
+    end
+  end
+
+  puts "Before cleaning, found #{emails.length} emails to nurture."
+
+  emails = clean_emails(emails).reject { |e| e.ends_with?("@dobt.co") }
+
+  puts "After cleaning, found #{emails.length} emails to nurture."
+
+  emails
+end
+
+def add_recipient(email)
+  resp = HTTParty.post(
+    "https://api.sendgrid.com/v3/contactdb/recipients",
+    headers: sendgrid_auth_header,
+    body: [
+      { email: email }
+    ].to_json
+  )
+
+  if resp.code == 201
+    resp.dig('persisted_recipients', 0)
   end
 end
 
-puts "Before cleaning, found #{emails.length} emails to nurture."
+def get_recipient_id_by_email(email)
+  resp = HTTParty.patch(
+    "https://api.sendgrid.com/v3/contactdb/recipients",
+    headers: sendgrid_auth_header,
+    body: [
+      { email: email }
+    ].to_json
+  )
 
-emails = emails.
-          map(&:downcase).
-          uniq.
-          reject { |e| e.ends_with?("@dobt.co") }
+  if resp.code == 201
+    resp.dig('persisted_recipients', 0)
+  end
+end
 
-puts "After cleaning, found #{emails.length} emails to nurture."
+def add_recipient_to_list(recipient_id)
+  resp = HTTParty.post(
+    "https://api.sendgrid.com/v3/contactdb/lists/#{NURTURE_LIST_ID}/recipients/#{recipient_id}",
+    headers: sendgrid_auth_header
+  )
+
+  resp.code == 201
+end
+
+def remove_recipient_from_list(recipient_id)
+  resp = HTTParty.delete(
+    "https://api.sendgrid.com/v3/contactdb/lists/#{NURTURE_LIST_ID}/recipients/#{recipient_id}",
+    headers: sendgrid_auth_header
+  )
+
+  resp.code == 204
+end
+
+def add_email(email)
+  if (recipient_id = add_recipient(email))
+    if add_recipient_to_list(recipient_id)
+      puts "Added #{email}"
+    else
+      puts "Failed to add #{email} to the nurture list"
+    end
+  else
+    puts "Failed to add #{email} to the contact database"
+  end
+end
+
+def remove_email(email)
+  if (recipient_id = get_recipient_id_by_email(email))
+    if remove_recipient_from_list(recipient_id)
+      puts "Removed #{email}"
+    else
+      puts "Failed to remove #{email} from the nurture list."
+    end
+  else
+    puts "Failed to retrieve the contact ID for #{email}."
+  end
+end
+
+list = get_nurture_list
+emails = get_nurture_emails_from_pipedrive
+
+emails_to_remove = list - emails
+emails_to_add = emails - list
+
+puts "Will remove #{emails_to_remove.length} emails."
+emails_to_remove.each { |e| remove_email(e) }
+
+puts "Will add #{emails_to_add.length} emails."
+emails_to_add.each { |e| add_email(e) }
+
+puts "All done!"
