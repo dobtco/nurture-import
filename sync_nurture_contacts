@@ -17,7 +17,14 @@ def sendgrid_auth_header
 end
 
 def clean_emails(emails)
-  emails.select(&:present?).map(&:downcase).uniq
+  emails.select(&:present?).map(&:downcase).map do |e|
+    # Pipedrive can return "Adam Becker <adam@dobt.co>"
+    if (matches = e.match(/<(.*)>/))
+      matches[1]
+    else
+      e
+    end
+  end.uniq
 end
 
 def get_nurture_list
@@ -45,21 +52,50 @@ def get_nurture_list
   emails
 end
 
+def get_pipedrive_deals(return_arr = [], pagination_start = 0)
+  res = Pipedrive::Base.get(
+    "/stages/#{NURTURE_STAGE_ID}/deals",
+    query: {
+      everyone: '1',
+      start: pagination_start
+    }
+  )
+
+  raise 'Error getting pipedrive deals' unless res.ok?
+
+  return_arr += Pipedrive::Base.all(res)
+
+  if (next_start = res.dig('additional_data', 'pagination', 'next_start'))
+    puts "Getting next page (#{next_start})"
+    get_pipedrive_deals(return_arr, next_start)
+  else
+    return_arr
+  end
+end
+
 def get_nurture_emails_from_pipedrive
   Pipedrive.authenticate(ENV['PIPEDRIVE_TOKEN'])
 
-  deals = Pipedrive::Base.all(Pipedrive::Base.get("/stages/#{NURTURE_STAGE_ID}/deals", query: {everyone: '1'}))
-
+  deals = get_pipedrive_deals
   deal_ids = deals.map(&:id)
   emails = []
 
   puts "Found #{deal_ids.length} deals in nurture."
 
   deal_ids.each do |deal_id|
-    participants = Pipedrive::Base.get("/deals/#{deal_id}/participants")['data']
+    puts "Getting participants for deal #{deal_id}"
+    participants_res = Pipedrive::Base.get("/deals/#{deal_id}/participants")
 
-    participants.each do |p|
-      emails << p.dig('person', 'email', 0, 'value')
+    if participants_res.code == 429
+      puts "Rate limit, sleeping..."
+      sleep participants_res.headers['Retry-After'].to_i + 1
+      participants_res = Pipedrive::Base.get("/deals/#{deal_id}/participants")
+    end
+
+    participants = participants_res['data']
+
+    Array(participants).each do |p|
+      emails << p.try(:[], 'person').try(:[], 'email').try(:first).try(:[], 'value')
     end
   end
 
